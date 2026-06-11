@@ -37,5 +37,30 @@
   `yt-dlp --skip-download --write-subs --write-auto-subs --sub-langs "ja,ja-JP,en" --sub-format vtt`
   → VTT からタイムスタンプ・インラインタグ・自動字幕の重複行を除去してプレーンテキスト化。
 
+## 追加調査ログ（egress が 200 になった後に判明した壁）
+あるセッションで `curl https://www.youtube.com` が **200** になった後も、字幕本体の取得は失敗した。
+原因は egress（共有プロキシ）側で、スクリプトのバグではない:
+
+| レイヤ | 結果 |
+| --- | --- |
+| 到達性 `curl youtube.com` | ✅ HTTP 200 |
+| youtube-transcript-api | ❌ `IpBlocked()`（YouTube には到達するが egress IP がブロック） |
+| yt-dlp（素のまま） | ❌ `CERTIFICATE_VERIFY_FAILED`（TLS 傍受プロキシのCAが certifi に無い） |
+| yt-dlp（`--no-check-certificates`＋ios/androidクライアント） | △ メタデータは取得可。**手動字幕なし／自動字幕 en・ja-orig・ja、元言語=日本語** |
+| 字幕本体 timedtext | ❌ HTTP 429（共有 egress IP がレート制限） |
+
+### `fetch_transcript.py` に入れた強化（このブランチ）
+- 起動時に system CA (`/etc/ssl/certs/ca-certificates.crt`) を `REQUESTS_CA_BUNDLE`/`SSL_CERT_FILE` に設定。
+- yt-dlp に `--no-check-certificates` を付与（プロキシ TLS 傍受対策）。
+- `--extractor-args youtube:player_client=ios,tv,web,android` でクライアントを巡回。
+- `--sleep-requests 3 --retries 10 --fragment-retries 10` ＋ コマンド全体を指数バックオフ(0/5/15/30s)で再試行（timedtext 429 対策）。
+- `--sub-langs ja,ja-orig,ja-JP,en`（元言語の `ja-orig` を追加）。`ja-orig` は自動生成として判定。
+- 字幕が取れない限りファイルは生成しない（捏造しない）。
+
+### それでも 429 が続く場合
+共有 egress IP の throttle が原因。**新しいセッションを起動して egress IP を変える**のが最も確実。
+Full ネットワークのまま「＋ New session」で開き直し、`bash run_fetch.sh` を再実行する。
+
 ## ブランチ
-`claude/youtube-transcript-extract-og120g`（このメモと `fetch_transcript.py` を含む）
+`claude/youtube-transcript-extract-og120g`（元メモと `fetch_transcript.py` を含む）
+作業ブランチ: `claude/youtube-transcript-fetch-3fhnok`（強化版スクリプトを含む）
