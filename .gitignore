@@ -1,0 +1,8 @@
+# Python bytecode cache
+__pycache__/
+*.pyc
+
+# yt-dlp intermediate subtitle downloads
+sub_*.vtt
+raw_*.vtt
+raw_*.json3
